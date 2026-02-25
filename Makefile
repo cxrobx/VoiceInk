@@ -60,6 +60,10 @@ local: check setup
 		build
 	@APP_PATH="$(LOCAL_DERIVED_DATA)/Build/Products/Debug/VoiceInk.app" && \
 	if [ -d "$$APP_PATH" ]; then \
+		echo "Re-signing with stable Apple Development identity..."; \
+		codesign --force --deep --sign "Apple Development" \
+			--entitlements "$(CURDIR)/VoiceInk/VoiceInk.local.entitlements" \
+			"$$APP_PATH" 2>&1 || echo "Warning: re-sign failed, falling back to ad-hoc"; \
 		echo "Copying VoiceInk.app to ~/Downloads..."; \
 		rm -rf "$$HOME/Downloads/VoiceInk.app"; \
 		ditto "$$APP_PATH" "$$HOME/Downloads/VoiceInk.app"; \

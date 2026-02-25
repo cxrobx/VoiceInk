@@ -471,8 +471,15 @@ class UpdaterViewModel: ObservableObject {
     @Published var automaticallyChecksForUpdates = false
 
     init() {
+        #if LOCAL_BUILD
+        // Local license-bypassed build: never start Sparkle — an official signed
+        // release would replace this build and re-enable the trial.
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
+        #else
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        #endif
 
         automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
 

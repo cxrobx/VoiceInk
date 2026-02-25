@@ -255,10 +255,12 @@ struct SettingsView: View {
                     }
 
                 HStack {
+                    #if !LOCAL_BUILD
                     Button("Check for Updates") {
                         updaterViewModel.checkForUpdates()
                     }
                     .disabled(!updaterViewModel.canCheckForUpdates)
+                    #endif
 
                     Button("Reset Onboarding") {
                         showResetOnboardingAlert = true

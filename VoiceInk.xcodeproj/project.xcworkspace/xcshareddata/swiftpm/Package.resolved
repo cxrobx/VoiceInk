@@ -38,15 +38,6 @@
       }
     },
     {
-      "identity" : "llmkit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Beingpax/LLMkit.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "7c32712a286221dab39da7e40d824a6d55e33dad"
-      }
-    },
-    {
       "identity" : "mediaremote-adapter",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Beingpax/mediaremote-adapter",
