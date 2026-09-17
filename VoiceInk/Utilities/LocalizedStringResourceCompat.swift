@@ -1,5 +1,6 @@
 import SwiftUI
 
+#if compiler(<6.1)
 // Local-build SDK compatibility (Xcode 16.2 / macOS 15.2 SDK).
 //
 // Upstream passes `LocalizedStringResource` directly to `.help(...)` and
@@ -21,3 +22,4 @@ extension View {
         accessibilityLabel(String(localized: resource))
     }
 }
+#endif
