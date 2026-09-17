@@ -1,0 +1,73 @@
+name: Build local VoiceInk app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [build/voiceink-macos]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify toolchain
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .ci-packages
+            ~/VoiceInk-Dependencies
+          key: voiceink-macos-xcode263-whisper192-${{ hashFiles('**/Package.resolved') }}
+      - name: Prepare official Whisper framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="$HOME/VoiceInk-Dependencies/whisper.cpp/build-apple"
+          if [ ! -d "$destination/whisper.xcframework" ]; then
+            curl --fail --location --retry 3 \
+              https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-v1.9.2-xcframework.zip \
+              -o "$RUNNER_TEMP/whisper.zip"
+            echo "af74fed13ea7f2d5ca2a39d9f58ec177713fafd7cab63aef4e27b79f3ceca80b  $RUNNER_TEMP/whisper.zip" | shasum -a 256 -c -
+            mkdir -p "$RUNNER_TEMP/whisper" "$destination"
+            ditto -x -k "$RUNNER_TEMP/whisper.zip" "$RUNNER_TEMP/whisper"
+            framework=$(find "$RUNNER_TEMP/whisper" -name whisper.xcframework -type d -print -quit)
+            test -n "$framework"
+            ditto "$framework" "$destination/whisper.xcframework"
+          fi
+      - name: Test vendored LLMkit
+        run: swift test --package-path LocalPackages/LLMkit
+      - name: Build unsigned local app
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project VoiceInk.xcodeproj -scheme VoiceInk \
+            -configuration Release -destination 'generic/platform=macOS' \
+            -derivedDataPath .ci-build -clonedSourcePackagesDirPath .ci-packages \
+            -xcconfig LocalBuild.xcconfig \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation -skipMacroValidation build 2>&1 | tee build.log
+      - name: Package app
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent .ci-build/Build/Products/Release/VoiceInk.app VoiceInk-arm64.zip
+          shasum -a 256 VoiceInk-arm64.zip > VoiceInk-arm64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoiceInk-arm64
+          path: |
+            VoiceInk-arm64.zip
+            VoiceInk-arm64.zip.sha256
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
