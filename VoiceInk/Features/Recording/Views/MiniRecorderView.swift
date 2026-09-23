@@ -102,6 +102,20 @@ struct MiniRecorderView<S: RecorderStateProvider & ObservableObject>: View {
         )
         .animation(.easeInOut(duration: 0.3), value: hasLiveTranscript)
         .animation(.easeInOut(duration: 0.3), value: hasAssistantResponse)
+        .miniRecorderWindowDrag()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
+
+private extension View {
+    /// `WindowDragGesture` and `allowsWindowActivationEvents` need macOS 15; on older
+    /// systems `MiniRecorderPanel` falls back to background dragging instead.
+    @ViewBuilder
+    func miniRecorderWindowDrag() -> some View {
+        if #available(macOS 15.0, *) {
+            self.gesture(WindowDragGesture()).allowsWindowActivationEvents()
+        } else {
+            self
+        }
     }
 }

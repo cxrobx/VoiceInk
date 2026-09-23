@@ -7,10 +7,15 @@ import Foundation
 /// API docs: https://docs.x.ai/developers/model-capabilities/audio/speech-to-text
 public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecked Sendable {
 
+    private static let audioFrameByteCount = 3_200  // 100 ms of mono PCM16 at 16 kHz.
+
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
     private var eventsContinuation: AsyncStream<StreamingTranscriptionEvent>.Continuation?
     private var receiveTask: Task<Void, Never>?
+    private var didSendAudioDone = false
+    private var didReceiveTranscriptDone = false
+    private var pendingAudio = Data()
     /// Chunk-final text accumulated for the current in-progress utterance.
     /// Cleared when `speech_final=true` or `transcript.done` fires.
     private var lockedUtteranceBuffer = ""
@@ -32,20 +37,30 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
 
     /// Connects to the xAI streaming endpoint.
     ///
-    /// The `model` parameter is accepted for protocol conformance but currently ignored —
-    /// the xAI STT endpoint does not expose per-model selection.
+    /// The shared provider protocol requires `model`, but LLMkit intentionally omits it
+    /// from the WebSocket URL so xAI selects its current default STT model (2.0).
     public func connect(apiKey: String, model: String, language: String?, customVocabulary: [String] = []) async throws {
         var components = URLComponents(string: "wss://api.x.ai/v1/stt")!
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "sample_rate", value: "16000"),
             URLQueryItem(name: "encoding", value: "pcm"),
+            // VoiceInk displays these replaceable updates while the user is speaking.
             URLQueryItem(name: "interim_results", value: "true"),
-            // Default is 10ms which chops sentences at micro-pauses. 800ms feels natural for dictation.
-            URLQueryItem(name: "endpointing", value: "800"),
+            // Detect silence quickly, then let Smart Turn decide whether the thought is complete.
+            URLQueryItem(name: "endpointing", value: "100"),
+            URLQueryItem(name: "smart_turn", value: "0.5"),
         ]
 
         if let language, language != "auto", !language.isEmpty {
             queryItems.append(URLQueryItem(name: "language", value: language))
+        }
+
+        let keyterms = customVocabulary.lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 50 }
+            .prefix(100)
+        for keyterm in keyterms {
+            queryItems.append(URLQueryItem(name: "keyterm", value: keyterm))
         }
 
         components.queryItems = queryItems
@@ -62,6 +77,9 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
 
         self.urlSession = session
         self.webSocketTask = task
+        didSendAudioDone = false
+        didReceiveTranscriptDone = false
+        pendingAudio.removeAll(keepingCapacity: true)
         task.resume()
 
         // Wait for `transcript.created` handshake before returning.
@@ -93,7 +111,13 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
         guard let task = webSocketTask else {
             throw LLMKitError.networkError("Not connected to xAI streaming.")
         }
-        try await task.send(.data(data))
+
+        pendingAudio.append(data)
+        while pendingAudio.count >= Self.audioFrameByteCount {
+            let frame = Data(pendingAudio.prefix(Self.audioFrameByteCount))
+            pendingAudio.removeFirst(Self.audioFrameByteCount)
+            try await task.send(.data(frame))
+        }
     }
 
     public func commit() async throws {
@@ -101,10 +125,22 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
             throw LLMKitError.networkError("Not connected to xAI streaming.")
         }
 
+        if !pendingAudio.isEmpty {
+            let finalFrame = pendingAudio
+            pendingAudio.removeAll(keepingCapacity: true)
+            try await task.send(.data(finalFrame))
+        }
+
         let endMessage: [String: Any] = ["type": "audio.done"]
         let jsonData = try JSONSerialization.data(withJSONObject: endMessage)
         let jsonString = String(data: jsonData, encoding: .utf8)!
-        try await task.send(.string(jsonString))
+        didSendAudioDone = true
+        do {
+            try await task.send(.string(jsonString))
+        } catch {
+            didSendAudioDone = false
+            throw error
+        }
     }
 
     public func disconnect() async {
@@ -116,6 +152,9 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
         urlSession = nil
         eventsContinuation?.finish()
         lockedUtteranceBuffer = ""
+        didSendAudioDone = false
+        didReceiveTranscriptDone = false
+        pendingAudio.removeAll(keepingCapacity: true)
     }
 
     // MARK: - Private
@@ -123,7 +162,7 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
     private func receiveLoop() async {
         guard let task = webSocketTask else { return }
 
-        while !Task.isCancelled {
+        while !Task.isCancelled && !didReceiveTranscriptDone {
             do {
                 let message = try await task.receive()
                 switch message {
@@ -137,7 +176,9 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
                     break
                 }
             } catch {
-                if !Task.isCancelled {
+                // xAI closes the WebSocket after acknowledging `audio.done` with
+                // `transcript.done`. That provider-initiated close is expected.
+                if !Task.isCancelled && !didSendAudioDone {
                     eventsContinuation?.yield(.error(error.localizedDescription))
                 }
                 break
@@ -174,8 +215,12 @@ public final class XAIStreamingClient: StreamingTranscriptionProvider, @unchecke
 
         case "transcript.done":
             let text = (json["text"] as? String) ?? ""
+            // xAI commonly returns an empty string here after sending the actual
+            // final text in preceding partial events. Still emit a committed event:
+            // consumers use it as the end-of-stream acknowledgement.
             eventsContinuation?.yield(.committed(text: text))
             lockedUtteranceBuffer = ""
+            didReceiveTranscriptDone = true
 
         case "error":
             let message = json["message"] as? String ?? "xAI streaming error"
