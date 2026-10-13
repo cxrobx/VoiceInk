@@ -23,11 +23,7 @@ final class MiniRecorderPanel: NSPanel {
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isMovable = true
-        if #available(macOS 15.0, *) {
-            isMovableByWindowBackground = false
-        } else {
-            isMovableByWindowBackground = true
-        }
+        isMovableByWindowBackground = false
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
