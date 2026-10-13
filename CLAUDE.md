@@ -60,6 +60,10 @@ Then grant Accessibility and Screen Recording in VoiceInk → Permissions.
 
 Xcode 27.0 on macOS 26.7.1 builds upstream unmodified (verified 2026-10-13).
 
+## After a merge: model files
+
+A FluidAudio bump can change which model files count as "downloaded", and the app then reports an already-downloaded Parakeet as missing ("'Parakeet V3' is not available"). The 2.21 merge needed two: VAD `silero-vad-unified-256ms-v6.2.1.mlmodelc` (in `FluidAudio/Models/silero-vad-coreml/`) and `JointDecisionv3.mlmodelc` (in `FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml/`). Compare `ModelNames.ASR.requiredModelsV3` and `ModelNames.VAD.requiredModels` in `.local-build/SourcePackages/checkouts/FluidAudio` with what is on disk, and fetch only the missing `.mlmodelc` from the FluidInference Hugging Face repo — re-downloading the whole model is not needed.
+
 ## External Dependents (don't break)
 
 - **notes4chris** reads the downloaded whisper model file at `~/Library/Application Support/com.prakashjoshipax.VoiceInk/WhisperModels/ggml-large-v3-turbo.bin` — never clean that directory.
