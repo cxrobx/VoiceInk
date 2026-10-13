@@ -30,11 +30,13 @@ Verify the merge, stage only intended files, and create the merge commit. Do not
 
 ## Building & Installing
 
-Builds locally with `make local` (Xcode 27.0). The old GitHub Actions route (`build/voiceink-macos` branch) was only needed while Xcode 16.2 was installed.
+Builds locally with `make local` (Xcode 27.0; first run needs `xcodebuild -downloadComponent MetalToolchain`, ~840 MB, for mlx-swift's Metal shaders). The old GitHub Actions route (`build/voiceink-macos` branch) was only needed while Xcode 16.2 was installed.
 
 ```bash
 cd ~/VoiceInk
 make local                                    # LOCAL_BUILD + stable signing + ditto → ~/Downloads/VoiceInk.app
+# make local logs "Using stable local signing identity" but the ~/Downloads copy comes out ad-hoc (2026-10-13) — re-sign:
+codesign --force --deep --options runtime --entitlements VoiceInk/VoiceInk.local.entitlements -s "Apple Development" ~/Downloads/VoiceInk.app
 codesign -dvv ~/Downloads/VoiceInk.app 2>&1 | grep -E "Authority|TeamIdentifier"
 #   must show "Apple Development: Christopher Robinson" / CCYV5HQZCM — ad-hoc means the re-sign failed (permissions would reset)
 pkill VoiceInk
